@@ -1,0 +1,29 @@
+# Dotty Dependencies
+# Install with: pip install -r requirements.txt
+
+# Core (Required for basic functionality)
+pillow
+
+# Forensic Analysis
+pytsk3
+dissect.target
+
+# Memory Dump Analysis
+volatility3
+
+# ISO Image Analysis
+pycdlib
+
+# Browser History Analysis
+lz4
+
+# Email Analysis
+pypff
+
+# Device Capture
+psutil
+paramiko
+
+# Optional Features
+pdf2image
+
