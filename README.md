@@ -28,6 +28,7 @@ python main.py
 
 ## Project Structure
 
+```text
 dotty/
 ├── core/           # Core functionality (error handling, config, etc.)
 ├── models/         # Data models (FileNode, Graph, etc.)
@@ -37,6 +38,7 @@ dotty/
 ├── graph/          # Graph layout and linking algorithms
 ├── utils/          # Utility scripts
 └── logs/           # Application logs and error reports
+```
 
 ## Requirements
 
