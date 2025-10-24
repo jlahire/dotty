@@ -1,11 +1,12 @@
 """
 case_dialog.py - popup dialog for collecting case information
+IMPROVED: Better window resizing, scrollable content, smaller minimum size
 """
 
 import tkinter as tk
 from tkinter import scrolledtext
 from models.case_manager import CaseInfo
-from ui.font_config import get_font
+from font_config import get_font
 
 
 class CaseDialog(tk.Toplevel):
@@ -15,9 +16,12 @@ class CaseDialog(tk.Toplevel):
         super().__init__(parent)
         
         self.title("forensic case information")
-        self.geometry("500x600")
+        self.geometry("500x550")
         self.configure(bg='#252526')
-        self.resizable(False, False)
+        self.resizable(True, True)
+        
+        # Set minimum size to ensure buttons are visible - reduced for smaller screens
+        self.minsize(350, 400)
         
         # center on parent
         self.transient(parent)
@@ -32,12 +36,12 @@ class CaseDialog(tk.Toplevel):
         # center window
         self.update_idletasks()
         x = parent.winfo_x() + (parent.winfo_width() // 2) - 250
-        y = parent.winfo_y() + (parent.winfo_height() // 2) - 300
+        y = parent.winfo_y() + (parent.winfo_height() // 2) - 275
         self.geometry(f"+{x}+{y}")
     
     def setup_ui(self):
-        """create dialog UI"""
-        # title
+        """create dialog UI with scrollable content"""
+        # title - keep at top, not scrollable
         title = tk.Label(self, text="forensic case details",
                         font=get_font('title', bold=True),
                         bg='#252526', fg='#4fc3f7')
@@ -49,9 +53,33 @@ class CaseDialog(tk.Toplevel):
                            bg='#252526', fg='#9cdcfe')
         subtitle.pack(pady=5)
         
-        # form frame
-        form = tk.Frame(self, bg='#252526')
-        form.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+        # Create a canvas with scrollbar for the form content
+        canvas_frame = tk.Frame(self, bg='#252526')
+        canvas_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+        
+        canvas = tk.Canvas(canvas_frame, bg='#252526', highlightthickness=0)
+        scrollbar = tk.Scrollbar(canvas_frame, orient="vertical", command=canvas.yview)
+        scrollable_frame = tk.Frame(canvas, bg='#252526')
+        
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+        
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        
+        # Enable mousewheel scrolling
+        def _on_mousewheel(event):
+            canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+        canvas.bind_all("<MouseWheel>", _on_mousewheel)
+        
+        # form frame inside scrollable area
+        form = tk.Frame(scrollable_frame, bg='#252526')
+        form.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         
         # case name (required)
         self.add_field(form, "case name*:", 0)
@@ -72,29 +100,29 @@ class CaseDialog(tk.Toplevel):
                                           font=get_font('text'), insertbackground='#d4d4d4')
         self.case_number_entry.grid(row=5, column=0, sticky='ew', pady=(0, 15))
         
-        # description (optional)
+        # description (optional) - reduced height
         self.add_field(form, "description:", 6)
         self.description_text = tk.Text(form, bg='#3c3c3c', fg='#d4d4d4',
-                                       font=get_font('text'), height=4,
+                                       font=get_font('text'), height=3,
                                        insertbackground='#d4d4d4')
         self.description_text.grid(row=7, column=0, sticky='ew', pady=(0, 15))
         
-        # notes (optional)
+        # notes (optional) - reduced height
         self.add_field(form, "notes:", 8)
         self.notes_text = tk.Text(form, bg='#3c3c3c', fg='#d4d4d4',
-                                 font=get_font('text'), height=4,
+                                 font=get_font('text'), height=3,
                                  insertbackground='#d4d4d4')
         self.notes_text.grid(row=9, column=0, sticky='ew', pady=(0, 15))
         
         form.columnconfigure(0, weight=1)
         
-        # required note
+        # required note - keep at bottom, not scrollable
         required = tk.Label(self, text="* required fields",
                            font=get_font('small', italic=True),
                            bg='#252526', fg='#666666')
         required.pack(pady=5)
         
-        # buttons
+        # buttons - keep at bottom, not scrollable
         btn_frame = tk.Frame(self, bg='#252526')
         btn_frame.pack(pady=15)
         
@@ -163,4 +191,3 @@ class CaseDialog(tk.Toplevel):
         """return case info if dialog was successful"""
         self.wait_window()
         return self.case_info if self.result else None
-    

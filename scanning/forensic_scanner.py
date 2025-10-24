@@ -22,7 +22,7 @@ from core.progress_manager import ProgressTracker
 
 
 # Check for dissect availability using dependency manager
-if is_available('dissect'):
+if is_available('dissect.target'):
     try:
         from dissect.target import Target
         from dissect.evidence import ewf
@@ -106,7 +106,7 @@ class ForensicScanner:
         try:
             if self.image_type == 'E01':
                 # Check if dissect is available
-                if not is_available('dissect'):
+                if not is_available('dissect.target'):
                     error_msg = (
                         "E01 format requires dissect library\n\n"
                         "Install with:\n"
