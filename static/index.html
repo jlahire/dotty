@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>dotty v2</title>
+  <link rel="stylesheet" href="/style.css?v=5">
+  <script src="https://unpkg.com/cytoscape@3.30.4/dist/cytoscape.min.js"></script>
+</head>
+<body>
+
+  <header id="toolbar">
+    <div class="toolbar-left">
+      <span class="logo">dotty</span>
+      <select id="scan-mode">
+        <option value="live">Live Directory</option>
+        <option value="forensic">Forensic Image</option>
+        <option value="memory">Memory Dump</option>
+        <option value="iso">ISO Image</option>
+        <option value="web">Web Page</option>
+        <option value="web-interactive">Interactive</option>
+      </select>
+      <form id="scan-form">
+        <input type="text" id="scan-path" placeholder="Path or URL to scan..." autocomplete="off">
+        <button type="submit" id="scan-btn">Scan</button>
+      </form>
+      <div class="toolbar-sep"></div>
+      <button id="analyze-browser-btn" class="toolbar-action" title="Analyze browser artifacts">Browser</button>
+      <button id="analyze-email-btn" class="toolbar-action" title="Analyze email files">Email</button>
+      <button id="analyze-prefetch-btn" class="toolbar-action" title="Analyze prefetch files">Prefetch</button>
+    </div>
+    <div class="toolbar-right">
+      <input type="text" id="search-input" placeholder="Search... (Ctrl+F)" autocomplete="off">
+      <div id="search-results" class="dropdown hidden"></div>
+      <button id="export-btn" class="toolbar-action" title="Export graph JSON (Ctrl+E)">Export</button>
+    </div>
+  </header>
+
+  <div id="progress-bar" class="hidden">
+    <div id="progress-fill"></div>
+    <span id="progress-text"></span>
+  </div>
+
+  <div id="main">
+
+    <aside id="sidebar-left">
+      <div class="panel">
+        <div class="panel-tabs">
+          <button class="tab active" data-panel="stats-panel">Stats</button>
+          <button class="tab" data-panel="tree-panel">Tree</button>
+          <button class="tab" data-panel="filter-panel">Filters</button>
+          <button class="tab" data-panel="favorites-panel">Marked</button>
+          <button class="tab" data-panel="timeline-panel">Timeline</button>
+        </div>
+        <div id="stats-panel" class="panel-content active">
+          <div id="graph-stats"></div>
+        </div>
+        <div id="tree-panel" class="panel-content">
+          <div id="tree-view"></div>
+        </div>
+        <div id="favorites-panel" class="panel-content">
+          <div id="favorites-view"></div>
+        </div>
+        <div id="filter-panel" class="panel-content">
+          <div id="filter-controls">
+            <div class="filter-group">
+              <h4>Show/Hide</h4>
+              <label><input type="checkbox" id="f-hidden" checked> Hidden files</label>
+              <label><input type="checkbox" id="f-system" checked> System files</label>
+              <label><input type="checkbox" id="f-folders" checked> Folders</label>
+              <label><input type="checkbox" id="f-deleted" checked> Deleted files</label>
+            </div>
+            <div class="filter-group">
+              <h4>Node Types</h4>
+              <div id="kind-filters"></div>
+            </div>
+            <div class="filter-group">
+              <h4>Extensions</h4>
+              <div id="ext-filters"></div>
+            </div>
+            <div class="filter-group">
+              <h4>Size Range</h4>
+              <div class="range-row">
+                <input type="number" id="f-size-min" placeholder="Min bytes" min="0">
+                <input type="number" id="f-size-max" placeholder="Max bytes" min="0">
+              </div>
+              <button id="f-size-apply" class="filter-apply">Apply</button>
+            </div>
+            <div class="filter-group">
+              <h4>Date Range</h4>
+              <div class="range-row">
+                <input type="date" id="f-date-min">
+                <input type="date" id="f-date-max">
+              </div>
+              <button id="f-date-apply" class="filter-apply">Apply</button>
+            </div>
+            <button id="f-reset" class="filter-reset">Reset All Filters</button>
+          </div>
+        </div>
+        <div id="timeline-panel" class="panel-content">
+          <div id="timeline-heatmap">
+            <canvas id="heatmap-canvas" width="250" height="140"></canvas>
+            <div id="timeline-info"></div>
+          </div>
+          <div id="timeline-interactive" class="hidden">
+            <div id="tl-header">
+              <span id="tl-title">Session Timeline</span>
+              <div id="tl-legend">
+                <span class="tl-legend-item" data-kind="navigation"><span class="tl-dot" style="background:#4fc3f7"></span>Nav</span>
+                <span class="tl-legend-item" data-kind="redirect"><span class="tl-dot" style="background:#ff9800"></span>Redir</span>
+                <span class="tl-legend-item" data-kind="cookie"><span class="tl-dot" style="background:#ce93d8"></span>Cookie</span>
+                <span class="tl-legend-item" data-kind="request"><span class="tl-dot" style="background:#66bb6a"></span>Req</span>
+                <span class="tl-legend-item" data-kind="error"><span class="tl-dot" style="background:#ff5252"></span>Error</span>
+              </div>
+            </div>
+            <div id="tl-flow"></div>
+            <div id="tl-status"></div>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <main id="graph-container"></main>
+
+    <aside id="sidebar-right">
+      <div class="panel">
+        <div class="panel-tabs">
+          <button class="tab active" data-panel="info-panel">Info</button>
+          <button class="tab" data-panel="security-panel">Security</button>
+          <button class="tab" data-panel="session-panel">Logs</button>
+          <button class="tab" data-panel="chat-panel">Chat</button>
+        </div>
+        <div id="info-panel" class="panel-content active">
+          <div id="node-info">
+            <p class="placeholder">Select a node to view details</p>
+          </div>
+        </div>
+        <div id="security-panel" class="panel-content">
+          <div id="security-score"></div>
+          <div id="security-findings"></div>
+          <div id="security-cookies"></div>
+        </div>
+        <div id="session-panel" class="panel-content">
+          <div id="session-controls">
+            <button id="session-stop-btn" disabled>Stop Session</button>
+          </div>
+          <div id="session-filter-bar">
+            <label><input type="checkbox" class="session-filter-cb" data-event="request" checked> Requests</label>
+            <label><input type="checkbox" class="session-filter-cb" data-event="response" checked> Responses</label>
+            <label><input type="checkbox" class="session-filter-cb" data-event="redirect" checked> Redirects</label>
+            <label><input type="checkbox" class="session-filter-cb" data-event="cookie_set" checked> Cookies</label>
+            <label><input type="checkbox" class="session-filter-cb" data-event="cookie_modified" checked> Cookie changes</label>
+            <label><input type="checkbox" class="session-filter-cb" data-event="console" checked> Console</label>
+            <label><input type="checkbox" class="session-filter-cb" data-event="js_error" checked> JS Errors</label>
+            <label><input type="checkbox" class="session-filter-cb" data-event="navigation" checked> Navigation</label>
+          </div>
+          <div id="session-log"></div>
+          <div id="session-stats"></div>
+        </div>
+        <div id="chat-panel" class="panel-content">
+          <div id="chat-messages"></div>
+          <div id="chat-input-area">
+            <div id="chat-quick-actions">
+              <button class="quick-action" data-msg="Analyze deleted files">Deleted</button>
+              <button class="quick-action" data-msg="Find suspicious files">Suspicious</button>
+              <button class="quick-action" data-msg="Summarize this scan">Summarize</button>
+              <button class="quick-action" data-msg="Find files related by context">Context</button>
+            </div>
+            <form id="chat-form">
+              <input type="text" id="chat-input" placeholder="Ask about the files..." autocomplete="off">
+              <button type="submit" id="chat-btn">Send</button>
+            </form>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+  </div>
+
+  <script src="/app.js?v=5"></script>
+</body>
+</html>
