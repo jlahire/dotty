@@ -64,6 +64,7 @@ let focusNodeId = null;
 let chatStreamEl = null;
 let sessionActive = false;
 let sessionEvents = [];
+const _ipCache = {}; // hostname -> resolved IP (populated from traffic events)
 
 
 // ── graph ──
@@ -217,7 +218,7 @@ function showContextMenu(cyNode, x, y) {
   if (isWeb && nodePath.startsWith('http')) {
     items.push({ label: 'Open in new tab', action: () => window.open(nodePath, '_blank') });
   } else if (isFile) {
-    items.push({ label: 'Preview file', action: () => previewFile(nodeId) });
+    items.push({ label: 'View Preview', action: () => previewFile(nodeId) });
     items.push({ label: 'Download file', action: () => downloadFile(nodeId) });
   }
 
@@ -339,9 +340,103 @@ async function previewFile(nodeId) {
   const resp = await fetch(`/api/graph/node/${nodeId}/preview`);
   const data = await resp.json();
   if (data.error) { showPreviewModal(data.error, 'text', 'Error'); return; }
-  if (data.type === 'text') showPreviewModal(data.content, 'text', data.name);
+  if (data.type === 'web') showWebPreviewModal(data);
+  else if (data.type === 'text') showPreviewModal(data.content, 'text', data.name);
   else if (data.type === 'image') showPreviewModal(data.url, 'image', data.name);
   else showPreviewModal(`Binary file: ${data.name}\nSize: ${formatSize(data.size)}\nType: ${data.mime}\n\nUse "Download file" to save.`, 'text', data.name);
+}
+
+function showWebPreviewModal(data) {
+  hidePreviewModal();
+  const overlay = document.createElement('div');
+  overlay.id = 'preview-overlay';
+  overlay.addEventListener('click', e => { if (e.target === overlay) hidePreviewModal(); });
+
+  const modal = document.createElement('div');
+  modal.id = 'preview-modal';
+  modal.classList.add('preview-wide');
+
+  const header = document.createElement('div');
+  header.id = 'preview-header';
+  header.innerHTML = `
+    <span class="preview-title">${data.name || 'Preview'}</span>
+    <div class="preview-tab-bar">
+      <button class="preview-tab active" data-tab="render">Preview</button>
+      <button class="preview-tab" data-tab="source">Source</button>
+    </div>
+    <button id="preview-close">&times;</button>`;
+  modal.appendChild(header);
+
+  const body = document.createElement('div');
+  body.id = 'preview-body';
+  body.style.padding = '0';
+  body.style.overflow = 'hidden';
+  body.style.display = 'flex';
+  body.style.flexDirection = 'column';
+
+  const iframePane = document.createElement('div');
+  iframePane.id = 'preview-iframe-pane';
+  const iframe = document.createElement('iframe');
+  iframe.src = data.url;
+  // external URLs: don't grant same-origin so the sandbox is meaningful
+  const isExternal = data.url.startsWith('http://') || data.url.startsWith('https://');
+  iframe.sandbox = isExternal
+    ? 'allow-scripts allow-forms allow-popups'
+    : 'allow-scripts allow-same-origin allow-forms';
+  iframePane.appendChild(iframe);
+  body.appendChild(iframePane);
+
+  const sourcePane = document.createElement('div');
+  sourcePane.id = 'preview-source-pane';
+  sourcePane.style.display = 'none';
+  const srcPre = document.createElement('pre');
+  const srcCode = document.createElement('code');
+  srcCode.textContent = 'Loading...';
+  srcPre.appendChild(srcCode);
+  sourcePane.appendChild(srcPre);
+  body.appendChild(sourcePane);
+
+  modal.appendChild(body);
+  overlay.appendChild(modal);
+  document.body.appendChild(overlay);
+
+  let sourceLoaded = false;
+  header.querySelectorAll('.preview-tab').forEach(tab => {
+    tab.addEventListener('click', async () => {
+      header.querySelectorAll('.preview-tab').forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      if (tab.dataset.tab === 'render') {
+        iframePane.style.display = '';
+        sourcePane.style.display = 'none';
+      } else {
+        iframePane.style.display = 'none';
+        sourcePane.style.display = '';
+        if (!sourceLoaded) {
+          sourceLoaded = true;
+          try {
+            const r = await fetch(data.url);
+            const text = await r.text();
+            const ext = (data.name || '').split('.').pop().toLowerCase();
+            const langMap = { html: 'html', htm: 'html', svg: 'xml', js: 'javascript', css: 'css', json: 'json', ts: 'typescript' };
+            const lang = langMap[ext] || 'plaintext';
+            srcCode.className = `language-${lang}`;
+            srcCode.textContent = text;
+            if (window.hljs) {
+              hljs.highlightElement(srcCode);
+              if (hljs.lineNumbersBlock) hljs.lineNumbersBlock(srcCode);
+            }
+          } catch (e) {
+            srcCode.textContent = `Could not load source: ${e.message}\n\nFor external URLs, use the Preview tab or open in a new tab.`;
+          }
+        }
+      }
+    });
+  });
+
+  document.getElementById('preview-close').addEventListener('click', hidePreviewModal);
+  document.addEventListener('keydown', function esc(e) {
+    if (e.key === 'Escape') { hidePreviewModal(); document.removeEventListener('keydown', esc); }
+  });
 }
 
 function showPreviewModal(content, type, title) {
@@ -367,8 +462,28 @@ function showPreviewModal(content, type, title) {
     body.appendChild(img);
   } else {
     const pre = document.createElement('pre');
-    pre.textContent = content;
-    body.appendChild(pre);
+    const ext = (title || '').split('.').pop().toLowerCase();
+    const langMap = {
+      js:'javascript', ts:'typescript', jsx:'javascript', tsx:'typescript',
+      html:'html', htm:'html', css:'css', json:'json', py:'python',
+      sh:'bash', bash:'bash', xml:'xml', yaml:'yaml', yml:'yaml',
+      sql:'sql', rs:'rust', go:'go', c:'c', cpp:'cpp', h:'c',
+      java:'java', rb:'ruby', php:'php', md:'markdown',
+      toml:'ini', ini:'ini', cfg:'ini', conf:'ini', env:'bash',
+    };
+    const lang = langMap[ext];
+    if (lang && window.hljs) {
+      const code = document.createElement('code');
+      code.className = `language-${lang}`;
+      code.textContent = content;
+      pre.appendChild(code);
+      body.appendChild(pre);
+      hljs.highlightElement(code);
+      if (hljs.lineNumbersBlock) hljs.lineNumbersBlock(code);
+    } else {
+      pre.textContent = content;
+      body.appendChild(pre);
+    }
   }
   modal.appendChild(body);
   overlay.appendChild(modal);
@@ -914,6 +1029,91 @@ function initSecurity() {
 }
 
 
+// ── files panel ──
+
+const KIND_COLOR = {
+  'web_script': '#f7df1e', 'web_style': '#264de4',
+  'web_page': '#e34c26', 'web_image': '#ff69b4',
+};
+const KIND_LABEL = {
+  'web_script': 'JS', 'web_style': 'CSS',
+  'web_page': 'HTML', 'web_image': 'IMG',
+};
+
+let _webFiles = [];
+let _filesTypeFilter = 'all';
+
+async function loadWebFiles() {
+  const resp = await fetch('/api/graph/web-files');
+  _webFiles = await resp.json();
+  _filesTypeFilter = 'all';
+  document.querySelectorAll('.files-type-btn').forEach(b => b.classList.toggle('active', b.dataset.type === 'all'));
+  const search = document.getElementById('files-search');
+  if (search) search.value = '';
+  renderWebFiles();
+}
+
+function renderWebFiles() {
+  const list = document.getElementById('files-list');
+  if (!list) return;
+  const search = (document.getElementById('files-search').value || '').trim().toLowerCase();
+  let files = _webFiles;
+  if (_filesTypeFilter !== 'all') files = files.filter(f => f.kind === _filesTypeFilter);
+  if (search) files = files.filter(f =>
+    f.name.toLowerCase().includes(search) ||
+    (f.info.domain || '').toLowerCase().includes(search) ||
+    (f.path || '').toLowerCase().includes(search)
+  );
+
+  if (!files.length) {
+    list.innerHTML = '<p class="placeholder">' + (_webFiles.length ? 'No matches' : 'Run a web scan to see page resources') + '</p>';
+    return;
+  }
+
+  // update type button counts
+  document.querySelectorAll('.files-type-btn').forEach(btn => {
+    const t = btn.dataset.type;
+    const count = t === 'all' ? _webFiles.length : _webFiles.filter(f => f.kind === t).length;
+    const base = KIND_LABEL[t] || 'All';
+    btn.textContent = count ? `${base} ${count}` : base;
+  });
+
+  list.innerHTML = files.map(f => {
+    const ext = (f.info.extension || '').replace('.', '').toUpperCase() || KIND_LABEL[f.kind] || '';
+    const color = KIND_COLOR[f.kind] || '#888';
+    const textColor = (f.kind === 'web_style') ? '#fff' : '#000';
+    const tp = f.info.third_party ? '<span class="files-tp">3P</span>' : '';
+    const domain = escHtml(f.info.domain || '');
+    return `<div class="files-item" data-id="${f.id}">
+      <span class="files-ext-badge" style="background:${color};color:${textColor}">${ext}</span>
+      <div class="files-item-body">
+        <span class="files-name" title="${escHtml(f.path)}">${escHtml(f.name)}</span>
+        <span class="files-domain">${tp}${domain}</span>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function initFilesPanel() {
+  document.getElementById('files-filter-bar').addEventListener('click', e => {
+    const btn = e.target.closest('.files-type-btn');
+    if (!btn) return;
+    document.querySelectorAll('.files-type-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    _filesTypeFilter = btn.dataset.type;
+    renderWebFiles();
+  });
+
+  document.getElementById('files-search').addEventListener('input', renderWebFiles);
+
+  document.getElementById('files-list').addEventListener('click', e => {
+    const item = e.target.closest('.files-item');
+    if (!item) return;
+    previewFile(item.dataset.id);
+  });
+}
+
+
 // ── scan ──
 
 function isUrl(str) { return /^https?:\/\//i.test(str) || /^[\w-]+\.\w{2,}/i.test(str); }
@@ -938,6 +1138,8 @@ function initScan() {
       document.getElementById('session-stats').textContent = '';
       sessionActive = true;
       document.getElementById('session-stop-btn').disabled = false;
+      document.getElementById('session-pause-btn').disabled = false;
+      document.getElementById('session-pause-btn').textContent = 'Pause';
       activateTab('session-panel');
       showInteractiveTimeline();
       showProgress(0, 'Launching browser...');
@@ -1009,7 +1211,12 @@ function truncUrl(url) {
   } catch { return `<span class="se-url">${escHtml((url || '').slice(0, 60))}</span>`; }
 }
 
-function renderSessionEvent(evt) {
+function _ipFromUrl(url) {
+  if (!url) return '';
+  try { return _ipCache[new URL(url).hostname] || ''; } catch { return ''; }
+}
+
+function renderSessionEvent(evt, idx) {
   const event = evt.event || 'unknown';
   const time = (evt.time || '').slice(11, 19);
   const icon = SESSION_ICONS[event] || '\u2022';
@@ -1064,17 +1271,19 @@ function renderSessionEvent(evt) {
       detail = escHtml(JSON.stringify(evt));
   }
 
-  return `<div class="session-event" data-event="${event}" style="border-left-color:${color}">
+  const ip = _ipFromUrl(evt.url || evt.from || '');
+  return `<div class="session-event" data-event="${event}" data-idx="${idx ?? 0}" style="border-left-color:${color}">
     <span class="se-time">${time}</span>
     <span class="se-icon">${icon}</span>
+    <span class="se-ip">${escHtml(ip)}</span>
     <span class="se-detail">${detail}</span>
   </div>`;
 }
 
 function appendSessionEvent(evt) {
-  sessionEvents.push(evt);
+  const idx = sessionEvents.push(evt) - 1;
   const log = document.getElementById('session-log');
-  const html = renderSessionEvent(evt);
+  const html = renderSessionEvent(evt, idx);
   log.insertAdjacentHTML('beforeend', html);
 
   applySessionFilters();
@@ -1114,14 +1323,102 @@ function updateSessionStats() {
   document.getElementById('session-stats').textContent = parts.join(' | ') || '';
 }
 
+function showLogDetailPopup(evt) {
+  const existing = document.getElementById('log-detail-overlay');
+  if (existing) existing.remove();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'log-detail-overlay';
+  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+
+  const modal = document.createElement('div');
+  modal.id = 'log-detail-modal';
+
+  const event = evt.event || 'unknown';
+  const color = SESSION_COLORS[event] || '#888';
+  const textDark = ['#ff9800','#66bb6a','#4fc3f7','var(--accent)'].some(c => color === c);
+  const badgeColor = textDark ? '#000' : '#fff';
+  const time = (evt.time || '').slice(0, 19).replace('T', ' ');
+
+  const header = document.createElement('div');
+  header.id = 'log-detail-header';
+  header.innerHTML = `
+    <span class="log-detail-badge" style="background:${color};color:${badgeColor}">${escHtml(event)}</span>
+    <span class="log-detail-time">${escHtml(time)}</span>
+    <button class="log-detail-close">&times;</button>`;
+  modal.appendChild(header);
+
+  const body = document.createElement('div');
+  body.id = 'log-detail-body';
+
+  const ip = _ipFromUrl(evt.url || evt.from || '');
+  const allFields = ip ? { ip, ...evt } : { ...evt };
+  const skip = new Set(['type', 'event', 'time']);
+
+  for (const [k, v] of Object.entries(allFields)) {
+    if (skip.has(k) || v === undefined || v === null || v === '') continue;
+    const row = document.createElement('div');
+    row.className = 'log-detail-row';
+
+    const label = document.createElement('span');
+    label.className = 'log-detail-label';
+    label.textContent = k;
+
+    const value = document.createElement('span');
+    value.className = 'log-detail-value';
+
+    const str = String(v);
+    if (typeof v === 'object') {
+      value.textContent = JSON.stringify(v, null, 2);
+      value.classList.add('log-detail-json');
+    } else if (str.startsWith('http://') || str.startsWith('https://')) {
+      const a = document.createElement('a');
+      a.href = str; a.target = '_blank'; a.rel = 'noopener noreferrer';
+      a.textContent = str;
+      value.appendChild(a);
+    } else {
+      value.textContent = str;
+    }
+
+    row.appendChild(label);
+    row.appendChild(value);
+    body.appendChild(row);
+  }
+
+  modal.appendChild(body);
+  overlay.appendChild(modal);
+  document.body.appendChild(overlay);
+
+  header.querySelector('.log-detail-close').addEventListener('click', () => overlay.remove());
+  const esc = e => { if (e.key === 'Escape') { overlay.remove(); document.removeEventListener('keydown', esc); } };
+  document.addEventListener('keydown', esc);
+}
+
 function initSession() {
+  document.getElementById('session-pause-btn').addEventListener('click', async () => {
+    const btn = document.getElementById('session-pause-btn');
+    if (btn.textContent === 'Resume') {
+      await fetch('/api/scan/web-interactive/resume', { method: 'POST' });
+    } else {
+      await fetch('/api/scan/web-interactive/pause', { method: 'POST' });
+    }
+  });
+
   document.getElementById('session-stop-btn').addEventListener('click', async () => {
     await fetch('/api/scan/web-interactive/stop', { method: 'POST' });
     document.getElementById('session-stop-btn').disabled = true;
+    document.getElementById('session-pause-btn').disabled = true;
   });
 
   document.getElementById('session-filter-bar').addEventListener('change', () => {
     applySessionFilters();
+  });
+
+  document.getElementById('session-log').addEventListener('click', e => {
+    const row = e.target.closest('.session-event');
+    if (!row) return;
+    const idx = parseInt(row.dataset.idx, 10);
+    if (!isNaN(idx) && sessionEvents[idx]) showLogDetailPopup(sessionEvents[idx]);
   });
 }
 
@@ -1166,12 +1463,31 @@ function initWebSocket() {
   ws.onmessage = async event => {
     const msg = JSON.parse(event.data);
     if (msg.type === 'session_event') {
-      appendSessionEvent(msg);
-      appendTimelineEvent(msg);
-      if (msg.event === 'session_started') hideProgress();
+      if (msg.event === 'traffic') {
+        // populate IP cache for session log display
+        if (msg.ip && msg.url) {
+          try { _ipCache[new URL(msg.url).hostname] = msg.ip; } catch {}
+        }
+      } else {
+        appendSessionEvent(msg);
+        appendTimelineEvent(msg);
+      }
+      if (msg.event === 'session_started') {
+        hideProgress();
+        document.getElementById('session-pause-btn').disabled = false;
+        document.getElementById('session-pause-btn').textContent = 'Pause';
+      }
+      if (msg.event === 'session_paused') {
+        document.getElementById('session-pause-btn').textContent = 'Resume';
+      }
+      if (msg.event === 'session_resumed') {
+        document.getElementById('session-pause-btn').textContent = 'Pause';
+      }
       if (msg.event === 'session_ended') {
         sessionActive = false;
         document.getElementById('session-stop-btn').disabled = true;
+        document.getElementById('session-pause-btn').disabled = true;
+        document.getElementById('session-pause-btn').textContent = 'Pause';
       }
     }
     else if (msg.type === 'progress') showProgress(msg.percent, msg.message);
@@ -1185,6 +1501,7 @@ function initWebSocket() {
       drawHeatmap();
       loadFavorites();
       loadSecurity();
+      await loadWebFiles();
     }
   };
   ws.onclose = () => setTimeout(initWebSocket, 3000);
@@ -1310,6 +1627,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initSession();
   initTimeline();
   initSecurity();
+  initFilesPanel();
   initKeyboard();
   initExport();
   initWebSocket();

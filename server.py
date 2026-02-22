@@ -269,6 +269,24 @@ async def stop_web_interactive():
     return {"status": "stopping"}
 
 
+@app.post("/api/scan/web-interactive/pause")
+async def pause_web_interactive():
+    global active_session
+    if active_session is None:
+        return JSONResponse({"error": "No active session"}, 404)
+    active_session.pause()
+    return {"status": "paused"}
+
+
+@app.post("/api/scan/web-interactive/resume")
+async def resume_web_interactive():
+    global active_session
+    if active_session is None:
+        return JSONResponse({"error": "No active session"}, 404)
+    active_session.resume()
+    return {"status": "resumed"}
+
+
 @app.post("/api/scan/iso")
 async def scan_iso(body: dict):
     path = body.get("path", "")
@@ -386,6 +404,11 @@ async def preview_node(node_id: str):
     if not node:
         return JSONResponse({"error": "Not found"}, 404)
 
+    # URL-based web nodes (from web/interactive scans) — preview via iframe
+    if node.path.startswith(("http://", "https://")):
+        mime = mimetypes.guess_type(node.name)[0] or "text/html"
+        return {"type": "web", "mime": mime, "name": node.name, "url": node.path}
+
     p = Path(node.path)
     if not p.is_file():
         return JSONResponse({"error": "Not a readable file", "path": node.path}, 400)
@@ -398,6 +421,12 @@ async def preview_node(node_id: str):
         ".log", ".env", ".toml", ".sql", ".jsx", ".tsx", ".vue", ".svelte",
     )
     is_image = mime.startswith("image/")
+    is_web_renderable = node.info.get("extension", "") in (".html", ".htm", ".svg")
+
+    if is_web_renderable:
+        return {"type": "web", "mime": mime, "name": node.name,
+                "url": f"/api/graph/node/{node_id}/download",
+                "size": p.stat().st_size}
 
     if is_image:
         return {"type": "image", "mime": mime, "name": node.name,
@@ -454,6 +483,26 @@ async def get_security():
         by_severity.setdefault(sev, []).append(f)
 
     return {"summary": summary, "by_severity": by_severity, "cookies": cookies}
+
+
+@app.get("/api/graph/web-files")
+async def get_web_files():
+    file_kinds = {"web_page", "web_script", "web_style", "web_image"}
+    results = []
+    for node in graph.nodes.values():
+        if node.kind not in file_kinds:
+            continue
+        if not node.path.startswith(("http://", "https://")):
+            continue
+        results.append({
+            "id": node.id,
+            "name": node.name,
+            "kind": node.kind,
+            "path": node.path,
+            "info": node.info,
+        })
+    results.sort(key=lambda x: (x["kind"], x["name"].lower()))
+    return results
 
 
 @app.get("/api/graph/search")

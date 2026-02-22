@@ -1,19 +1,29 @@
+# core
 fastapi>=0.109.0
 uvicorn[standard]>=0.27.0
 websockets>=12.0
+
+# optional: AI chat (needs Ollama running — https://ollama.com)
 ollama>=0.4.0
-pillow
 
-# Web security (optional — degrades to basic header checks)
-drheader
-
-# Interactive browser session (optional — needs: playwright install chromium)
+# optional: interactive browser sessions (also run: playwright install chromium)
 playwright
 
-# Forensic (optional — features degrade gracefully)
+# optional: web security header analysis
+drheader
+
+# optional: forensic disk images (DD/RAW)
 pytsk3
-dissect.target
+
+# optional: E01 forensic images
+dissect.evidence
+
+# optional: memory dump analysis
 volatility3
+
+# optional: ISO images
 pycdlib
-lz4
-psutil
+
+# optional: PST/OST email archives
+# pypff is NOT on pip — must be built from source (libpff C library + Python bindings)
+# see: https://github.com/libyal/libpff

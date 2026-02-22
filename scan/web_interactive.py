@@ -11,9 +11,28 @@ data into graph nodes following the list[Node] pattern.
 from __future__ import annotations
 
 import logging
+import socket
 import threading
 import urllib.parse
 from datetime import datetime
+
+# module-level DNS cache shared across sessions
+_dns_cache: dict[str, str] = {}
+
+
+def _resolve_ip(hostname: str) -> str:
+    """Resolve hostname → IP with cache; falls back to hostname on failure."""
+    hostname = hostname.strip("[]")  # strip IPv6 brackets
+    if not hostname:
+        return ""
+    if hostname in _dns_cache:
+        return _dns_cache[hostname]
+    try:
+        ip = socket.gethostbyname(hostname)
+    except Exception:
+        ip = hostname
+    _dns_cache[hostname] = ip
+    return ip
 
 from graph import Node, make_id
 
@@ -40,8 +59,10 @@ class InteractiveSession:
         self.url = url
         self.on_event = on_event or (lambda e: None)
         self._stop_event = threading.Event()
+        self._pause_event = threading.Event()  # set = paused, clear = running
         self.data = SessionData()
         self._started = datetime.now()
+        self._seen_ips: set[str] = set()  # tracks first-connection SYN per IP
 
     def start(self):
         """Blocking — run in executor thread. Launches browser and waits."""
@@ -97,6 +118,17 @@ class InteractiveSession:
     def stop(self):
         """Thread-safe — can be called from any thread."""
         self._stop_event.set()
+        self._pause_event.clear()  # unblock any paused wait
+
+    def pause(self):
+        """Pause event capture (browser stays open)."""
+        self._pause_event.set()
+        self._emit({"event": "session_paused", "time": datetime.now().isoformat()})
+
+    def resume(self):
+        """Resume event capture after pause."""
+        self._pause_event.clear()
+        self._emit({"event": "session_resumed", "time": datetime.now().isoformat()})
 
     def _attach_page(self, page, context):
         page.on("request", lambda req: self._on_request(req))
@@ -107,6 +139,18 @@ class InteractiveSession:
 
     def _on_request(self, request):
         now = datetime.now().isoformat()
+
+        # traffic log — emitted first so frontend IP cache is populated before request event
+        parsed_u = urllib.parse.urlparse(request.url)
+        hostname = parsed_u.netloc.split(":")[0].strip("[]")
+        ip = _resolve_ip(hostname)
+        path = parsed_u.path or "/"
+        if len(path) > 38:
+            path = path[:18] + "..." + path[-14:]
+        if ip and ip not in self._seen_ips:
+            self._seen_ips.add(ip)
+            self._emit_traffic("outgoing", ip, "SYN", request.url, now)
+        self._emit_traffic("outgoing", ip, f"{request.method} {path}", request.url, now)
 
         redirect_from = None
         rr = request.redirected_from
@@ -159,6 +203,15 @@ class InteractiveSession:
                 if rd["from_url"] == url and rd["status"] is None:
                     rd["status"] = status
                     break
+
+        # traffic log — incoming response (emitted first so frontend IP cache is populated)
+        parsed_u = urllib.parse.urlparse(url)
+        hostname = parsed_u.netloc.split(":")[0].strip("[]")
+        ip = _resolve_ip(hostname)
+        ct_short = content_type.split(";")[0].split("/")[-1][:12] if content_type else ""
+        status_cls = "OK" if status < 300 else ("REDIR" if status < 400 else "ERR")
+        msg = f"HTTP {status} {status_cls}" + (f" ({ct_short})" if ct_short else "")
+        self._emit_traffic("incoming", ip, msg, url, now)
 
         self._emit({"event": "response", "status": status, "url": url,
                      "content_type": content_type, "time": now})
@@ -225,7 +278,21 @@ class InteractiveSession:
 
         self.data._cookie_snapshot = current
 
+    def _emit_traffic(self, category: str, ip: str, msg: str, url: str, time: str):
+        self._emit({
+            "event": "traffic",
+            "category": category,
+            "ip": ip,
+            "msg": msg,
+            "url": url,
+            "time": time,
+        })
+
     def _emit(self, event):
+        # always pass through lifecycle events; drop others while paused
+        lifecycle = {"session_started", "session_ended", "session_paused", "session_resumed"}
+        if self._pause_event.is_set() and event.get("event") not in lifecycle:
+            return
         try:
             self.on_event({"type": "session_event", **event})
         except Exception as e:
@@ -368,7 +435,59 @@ class InteractiveSession:
                 },
             ))
 
+        # Individual resource file nodes (deduped by URL, key resource types only)
+        _RTYPE_MAP = {
+            "document": ("web_page", ".html"),
+            "script": ("web_script", ".js"),
+            "stylesheet": ("web_style", ".css"),
+            "image": ("web_image", ""),
+            "font": ("web_style", ""),
+            "media": ("web_image", ""),
+        }
+        seen_file_urls: set[str] = set()
+        for req in self.data.requests:
+            url = req["url"]
+            rtype = req.get("resource_type", "other")
+            if rtype not in _RTYPE_MAP or url in seen_file_urls:
+                continue
+            seen_file_urls.add(url)
+            kind, default_ext = _RTYPE_MAP[rtype]
+            fname = _file_name(url) or _short_url(url)
+            ext = default_ext
+            clean = url.lower().split("?")[0].split("#")[0]
+            for e in (".js", ".mjs", ".css", ".html", ".htm", ".png", ".jpg",
+                      ".jpeg", ".gif", ".svg", ".webp", ".ico", ".woff2",
+                      ".woff", ".ttf", ".eot", ".json"):
+                if clean.endswith(e):
+                    ext = e
+                    break
+            req_domain = urllib.parse.urlparse(url).netloc
+            nodes.append(Node(
+                id=make_id(f"webfile:interactive:{url}"),
+                name=fname,
+                path=url,
+                kind=kind,
+                info={
+                    "url": url,
+                    "resource_type": rtype,
+                    "domain": req_domain,
+                    "third_party": req_domain != domain,
+                    "extension": ext,
+                    "interactive": True,
+                    "modified": req["time"],
+                },
+            ))
+
         return nodes
+
+
+def _file_name(url: str) -> str:
+    try:
+        path = urllib.parse.urlparse(url).path
+        name = path.rstrip("/").split("/")[-1]
+        return urllib.parse.unquote(name) if name else ""
+    except Exception:
+        return ""
 
 
 def _short_url(url: str) -> str:

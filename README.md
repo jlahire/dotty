@@ -1,82 +1,61 @@
-# Dotty - Filesystem Graph Visualization Tool
+# dotty v2
 
-A forensic analysis tool that visualizes filesystem structures as interactive graphs.
+dotty turns filesystems, disk images, and web sessions into interactive graphs you can explore in a browser. built for forensic analysis and general poking around.
 
-## Features
+## what it does
 
-- **Live Filesystem Analysis** - Scan and visualize any directory
-- **Forensic Image Support** - Analyze DD, RAW, and E01 images
-- **Memory Dump Analysis** - Parse memory dumps with Volatility3
-- **Browser History** - Analyze browser data (Chrome, Firefox, Edge)
-- **Email Analysis** - Parse PST/OST email archives
-- **Git Integration** - Visualize repository structure and history
-- **Zettelkasten Layout** - Focus-based graph visualization
+- scan a local directory and see everything as a graph
+- load a forensic disk image (DD, RAW, E01) and browse its contents
+- parse memory dumps with Volatility3
+- mount and explore ISO images
+- scan a URL and map all its resources
+- open a live browser session — watch requests, cookies, console logs, and JS errors come in real-time, pause/resume whenever, and inspect any loaded file
+- analyze browser history (Chrome, Firefox, Edge), email archives (PST/OST), and Windows prefetch files
+- chat with the scan data via a local Ollama model
 
-## Installation
+## setup
 
 ```bash
-# Clone the repository
 git clone https://github.com/jlahire/dotty.git
 cd dotty
-
-# Install dependencies
 pip install -r requirements.txt
-
-# Run the application
 python main.py
 ```
 
-## Project Structure
+open `http://localhost:8000`
 
-```text
-dotty/
-├── core/           # Core functionality (error handling, config, etc.)
-├── models/         # Data models (FileNode, Graph, etc.)
-├── scanning/       # File system scanning modules
-├── analyzers/      # Forensic analyzers (memory, browser, etc.)
-├── ui/             # User interface components
-├── graph/          # Graph layout and linking algorithms
-├── utils/          # Utility scripts
-└── logs/           # Application logs and error reports
-```
-
-## Requirements
-
-- Python 3.11+
-- tkinter (usually bundled with Python)
-- See `requirements.txt` for full list
-
-## Optional Dependencies
-
-For advanced features, install:
+## optional extras
 
 ```bash
-# Forensic image support
+# live browser sessions (interactive mode)
+playwright install chromium
+
+# forensic disk images
 pip install pytsk3 dissect.target
 
-# Memory analysis
+# memory dumps
 pip install volatility3
 
-# Email analysis
-pip install pypff
-
-# ISO support
+# ISO images
 pip install pycdlib
+
+# email archives
+pip install pypff  # or: bash install_pypff.sh
 ```
 
-## Usage
+## structure
 
-1. Launch the application: `python main.py`
-2. Choose analysis mode from the File menu
-3. Select a folder, forensic image, or memory dump
-4. Explore the graph visualization
+```
+dotty/
+├── server.py       FastAPI backend + all routes
+├── graph.py        graph model
+├── chat.py         Ollama chat
+├── main.py         entry point
+├── scan/           scan backends
+├── analyze/        artifact analyzers
+└── static/         web UI
+```
 
-## License
+## license
 
-GNU Affero General Public License v3.0 (AGPL-3.0)
-
-See LICENSE for details
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
+AGPL-3.0 — see LICENSE

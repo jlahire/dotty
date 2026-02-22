@@ -4,8 +4,11 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>dotty v2</title>
-  <link rel="stylesheet" href="/style.css?v=5">
+  <link rel="stylesheet" href="/style.css?v=13">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
   <script src="https://unpkg.com/cytoscape@3.30.4/dist/cytoscape.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlightjs-line-numbers.js/2.8.0/highlightjs-line-numbers.min.js"></script>
 </head>
 <body>
 
@@ -127,6 +130,7 @@
         <div class="panel-tabs">
           <button class="tab active" data-panel="info-panel">Info</button>
           <button class="tab" data-panel="security-panel">Security</button>
+          <button class="tab" data-panel="files-panel">Files</button>
           <button class="tab" data-panel="session-panel">Logs</button>
           <button class="tab" data-panel="chat-panel">Chat</button>
         </div>
@@ -140,9 +144,21 @@
           <div id="security-findings"></div>
           <div id="security-cookies"></div>
         </div>
+        <div id="files-panel" class="panel-content">
+          <div id="files-filter-bar">
+            <button class="files-type-btn active" data-type="all">All</button>
+            <button class="files-type-btn" data-type="web_script">JS</button>
+            <button class="files-type-btn" data-type="web_style">CSS</button>
+            <button class="files-type-btn" data-type="web_page">HTML</button>
+            <button class="files-type-btn" data-type="web_image">Img</button>
+          </div>
+          <input type="text" id="files-search" placeholder="Filter files..." autocomplete="off">
+          <div id="files-list"><p class="placeholder">Run a web scan to see page resources</p></div>
+        </div>
         <div id="session-panel" class="panel-content">
           <div id="session-controls">
-            <button id="session-stop-btn" disabled>Stop Session</button>
+            <button id="session-pause-btn" disabled>Pause</button>
+            <button id="session-stop-btn" disabled>Stop</button>
           </div>
           <div id="session-filter-bar">
             <label><input type="checkbox" class="session-filter-cb" data-event="request" checked> Requests</label>
@@ -177,6 +193,6 @@
 
   </div>
 
-  <script src="/app.js?v=5"></script>
+  <script src="/app.js?v=13"></script>
 </body>
 </html>
